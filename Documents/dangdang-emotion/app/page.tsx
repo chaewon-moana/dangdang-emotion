@@ -150,6 +150,16 @@ export default function Home() {
     setTimeout(() => setMoodVisible(true), 100);
   };
 
+  const handleShare = async () => {
+    const text = `우리 강아지 감정 분석 결과\n${result?.emoji} ${result?.title}\n"${result?.sub}"\n\n댕댕 감정연구소에서 확인해보세요!`;
+    if (navigator.share) {
+      await navigator.share({ title: "댕댕 감정연구소", text, url: window.location.href });
+    } else {
+      await navigator.clipboard.writeText(window.location.href);
+      alert("링크가 복사됐어요!");
+    }
+  };
+
   const retry = () => {
     setScreen("upload");
     setPreviewSrc("");
@@ -384,6 +394,13 @@ export default function Home() {
             <p className="text-center text-xs text-purple-300 mt-3">
               오늘 남은 횟수: {remaining}/{DAILY_LIMIT}회
             </p>
+
+            <button
+              onClick={handleShare}
+              className="w-full mt-3 py-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all"
+            >
+              공유하기
+            </button>
 
             <button
               onClick={retry}
