@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import html2canvas from "html2canvas";
 
 const AD_SECONDS = 5;
 const DAILY_LIMIT = 3;
@@ -54,6 +55,7 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<AnalysisResult | null>(null);
+  const resultCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setUsageCount(getUsageData().count);
@@ -151,13 +153,22 @@ export default function Home() {
   };
 
   const handleShare = async () => {
-    const text = `우리 강아지 감정 분석 결과\n${result?.emoji} ${result?.title}\n"${result?.sub}"\n\n댕댕 감정연구소에서 확인해보세요!`;
-    if (navigator.share) {
-      await navigator.share({ title: "댕댕 감정연구소", text, url: window.location.href });
-    } else {
-      await navigator.clipboard.writeText(window.location.href);
-      alert("링크가 복사됐어요!");
-    }
+    if (!resultCardRef.current) return;
+    const canvas = await html2canvas(resultCardRef.current, { useCORS: true, scale: 2 });
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], "dangdang-emotion.png", { type: "image/png" });
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "댕댕 감정연구소", text: `${result?.emoji} ${result?.title}` });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "dangdang-emotion.png";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    }, "image/png");
   };
 
   const retry = () => {
@@ -331,7 +342,7 @@ export default function Home() {
         {/* 결과 스크린 */}
         {screen === "result" && result && (
           <div className="mt-4">
-            <div className="bg-white rounded-3xl overflow-hidden shadow-2xl shadow-purple-100">
+            <div ref={resultCardRef} className="bg-white rounded-3xl overflow-hidden shadow-2xl shadow-purple-100">
               <div className="relative">
                 <img src={previewSrc} alt="분석된 강아지" className="w-full h-56 object-cover" />
                 <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 bg-white rounded-full px-4 py-2 text-sm font-bold text-purple-800 shadow-lg whitespace-nowrap">
