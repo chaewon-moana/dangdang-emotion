@@ -52,6 +52,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [usageCount, setUsageCount] = useState(0);
   const [moodVisible, setMoodVisible] = useState(false);
+  const [dogName, setDogName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<AnalysisResult | null>(null);
@@ -204,6 +205,7 @@ export default function Home() {
     setPreviewSrc("");
     setImgBase64("");
     setResult(null);
+    setDogName("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -265,6 +267,20 @@ export default function Home() {
                   </button>
                 </>
               )}
+            </div>
+
+            <div className="mt-4">
+              <div className="bg-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-sm border border-pink-100">
+                <span className="text-2xl">🐶</span>
+                <input
+                  type="text"
+                  value={dogName}
+                  onChange={(e) => setDogName(e.target.value)}
+                  placeholder="강아지 이름을 입력해주세요"
+                  maxLength={10}
+                  className="flex-1 text-sm text-purple-800 placeholder-purple-200 outline-none bg-transparent"
+                />
+              </div>
             </div>
 
             {previewSrc && (
@@ -381,8 +397,13 @@ export default function Home() {
               <div className="pt-10 px-6 pb-6">
                 <div className="text-center mb-5">
                   <span className="text-5xl block animate-bounce">{result.emoji}</span>
+                  {dogName && (
+                    <p className="text-base font-bold text-pink-400 mt-2">
+                      {dogName}이(가) 지금...
+                    </p>
+                  )}
                   <h2
-                    className="text-2xl font-bold text-purple-900 mt-2"
+                    className="text-2xl font-bold text-purple-900 mt-1"
                     style={{ fontFamily: "cursive" }}
                   >
                     {result.title}
@@ -492,7 +513,12 @@ export default function Home() {
             {/* 메인 감정 */}
             <div style={{ textAlign: "center", padding: "16px 24px 8px" }}>
               <div style={{ fontSize: 52, lineHeight: 1.2 }}>{result.emoji}</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#4c1d95", marginTop: 6 }}>{result.title}</div>
+              {dogName && (
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#f472b6", marginTop: 8 }}>
+                  {dogName}이(가) 지금...
+                </div>
+              )}
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#4c1d95", marginTop: 4 }}>{result.title}</div>
               <div style={{ fontSize: 13, color: "#a78bfa", marginTop: 4 }}>{result.sub}</div>
             </div>
 
