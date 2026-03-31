@@ -1,11 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, mediaType } = await req.json();
+    const { imageBase64, mediaType, dogName } = await req.json();
 
     if (!imageBase64) {
       return NextResponse.json({ error: "이미지가 없어요" }, { status: 400 });
@@ -53,6 +54,33 @@ export async function POST(req: NextRequest) {
     const text = response.content.map((c) => (c.type === "text" ? c.text : "")).join("");
     const clean = text.replace(/```json|```/g, "").trim();
     const result = JSON.parse(clean);
+
+    // IP 주소 추출
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+
+    // 이미지를 Supabase Storage에 업로드
+    const imageBuffer = Buffer.from(imageBase64, "base64");
+    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("dog-images")
+      .upload(fileName, imageBuffer, { contentType: "image/jpeg" });
+
+    const imageUrl = uploadError
+      ? null
+      : supabase.storage.from("dog-images").getPublicUrl(fileName).data.publicUrl;
+
+    // DB에 저장
+    await supabase.from("analyses").insert({
+      dog_name: dogName || null,
+      result,
+      image_url: imageUrl,
+      ip_address: ip,
+      created_at: new Date().toISOString(),
+    });
 
     return NextResponse.json(result);
   } catch (e) {
