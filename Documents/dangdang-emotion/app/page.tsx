@@ -53,6 +53,8 @@ export default function Home() {
   const [usageCount, setUsageCount] = useState(0);
   const [moodVisible, setMoodVisible] = useState(false);
   const [dogName, setDogName] = useState("");
+  const [unlimitedMode, setUnlimitedMode] = useState(false);
+  const pawClickRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<AnalysisResult | null>(null);
@@ -209,7 +211,15 @@ export default function Home() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const remaining = Math.max(0, DAILY_LIMIT - usageCount);
+  const handlePawClick = () => {
+    pawClickRef.current += 1;
+    if (pawClickRef.current >= 5) {
+      pawClickRef.current = 0;
+      setUnlimitedMode((prev) => !prev);
+    }
+  };
+
+  const remaining = unlimitedMode ? 999 : Math.max(0, DAILY_LIMIT - usageCount);
   const timerPct = timerSec / AD_SECONDS;
 
   return (
@@ -220,12 +230,12 @@ export default function Home() {
         {screen === "upload" && (
           <div>
             <div className="text-center py-8">
-              <span className="text-5xl block animate-bounce">🐾</span>
+              <span className="text-5xl block animate-bounce cursor-pointer select-none" onClick={handlePawClick}>🐾</span>
               <h1 className="font-bold text-3xl text-purple-900 mt-2" style={{ fontFamily: "cursive" }}>
                 우리 강아지 감정은?
               </h1>
               <p className="text-sm text-purple-400 mt-1">사진 한 장으로 강아지 속마음을 읽어드려요</p>
-              <p className="text-xs text-purple-300 mt-1">오늘 남은 횟수: {remaining}/{DAILY_LIMIT}회</p>
+              <p className="text-xs text-purple-300 mt-1">{unlimitedMode ? "🔓 무제한 모드" : `오늘 남은 횟수: ${remaining}/${DAILY_LIMIT}회`}</p>
             </div>
 
             <div
