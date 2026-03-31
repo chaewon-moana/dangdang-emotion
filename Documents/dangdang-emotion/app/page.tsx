@@ -56,6 +56,7 @@ export default function Home() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<AnalysisResult | null>(null);
   const resultCardRef = useRef<HTMLDivElement>(null);
+  const shareCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setUsageCount(getUsageData().count);
@@ -165,23 +166,37 @@ export default function Home() {
     setTimeout(() => setMoodVisible(true), 100);
   };
 
+  const [sharing, setSharing] = useState(false);
+
   const handleShare = async () => {
-    if (!resultCardRef.current) return;
-    const canvas = await html2canvas(resultCardRef.current, { useCORS: true, scale: 2 });
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const file = new File([blob], "dangdang-emotion.png", { type: "image/png" });
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "댕댕 감정연구소", text: `${result?.emoji} ${result?.title}` });
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "dangdang-emotion.png";
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    }, "image/png");
+    if (!shareCardRef.current || !result) return;
+    setSharing(true);
+    try {
+      const canvas = await html2canvas(shareCardRef.current, {
+        useCORS: true,
+        allowTaint: true,
+        scale: 3,
+        backgroundColor: null,
+        logging: false,
+      });
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const file = new File([blob], "dangdang-emotion.png", { type: "image/png" });
+        if (navigator.share && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: "댕댕 감정연구소", text: `${result.emoji} ${result.title}` });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "dangdang-emotion.png";
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        setSharing(false);
+      }, "image/png");
+    } catch {
+      setSharing(false);
+    }
   };
 
   const retry = () => {
@@ -421,9 +436,10 @@ export default function Home() {
 
             <button
               onClick={handleShare}
-              className="w-full mt-3 py-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all"
+              disabled={sharing}
+              className="w-full mt-3 py-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              공유하기
+              {sharing ? "📸 이미지 만드는 중..." : "📤 이미지로 공유하기"}
             </button>
 
             <button
@@ -435,6 +451,93 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* 공유 전용 카드 (화면 밖 렌더링) */}
+      {result && previewSrc && (
+        <div style={{ position: "fixed", left: "-9999px", top: 0, zIndex: -1 }}>
+          <div
+            ref={shareCardRef}
+            style={{
+              width: 390,
+              background: "linear-gradient(145deg, #fdf2f8 0%, #f5f0ff 50%, #eff6ff 100%)",
+              borderRadius: 32,
+              overflow: "hidden",
+              fontFamily: "sans-serif",
+            }}
+          >
+            {/* 강아지 사진 */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewSrc}
+              alt="강아지"
+              style={{ width: "100%", height: 280, objectFit: "cover", display: "block" }}
+            />
+
+            {/* 배지 */}
+            <div style={{ textAlign: "center", marginTop: -18 }}>
+              <span style={{
+                display: "inline-block",
+                background: "white",
+                borderRadius: 99,
+                padding: "6px 18px",
+                fontSize: 13,
+                fontWeight: 700,
+                color: "#6d28d9",
+                boxShadow: "0 4px 12px rgba(109,40,217,0.15)",
+              }}>
+                {result.badge}
+              </span>
+            </div>
+
+            {/* 메인 감정 */}
+            <div style={{ textAlign: "center", padding: "16px 24px 8px" }}>
+              <div style={{ fontSize: 52, lineHeight: 1.2 }}>{result.emoji}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#4c1d95", marginTop: 6 }}>{result.title}</div>
+              <div style={{ fontSize: 13, color: "#a78bfa", marginTop: 4 }}>{result.sub}</div>
+            </div>
+
+            {/* 이유 카드들 */}
+            <div style={{ padding: "8px 20px" }}>
+              {result.reasons.map((r, i) => (
+                <div key={i} style={{
+                  display: "flex", gap: 10, alignItems: "flex-start",
+                  background: "#fff0f6", borderRadius: 16, padding: "10px 14px", marginBottom: 8,
+                }}>
+                  <span style={{ fontSize: 18 }}>{r.icon}</span>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#c4b5fd", fontWeight: 700 }}>{r.label}</div>
+                    <div style={{ fontSize: 13, color: "#5b21b6", lineHeight: 1.4 }}>{r.text}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* 감정 지수 */}
+            <div style={{ padding: "4px 20px 16px" }}>
+              <div style={{ fontSize: 11, color: "#c4b5fd", fontWeight: 600, marginBottom: 8 }}>감정 지수</div>
+              {result.moods.map((m, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, color: "#7c3aed", width: 32 }}>{m.name}</span>
+                  <div style={{ flex: 1, height: 8, background: "#f3f0ff", borderRadius: 99, overflow: "hidden" }}>
+                    <div style={{ width: `${m.pct}%`, height: "100%", background: m.color, borderRadius: 99 }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: "#c4b5fd", width: 28, textAlign: "right" }}>{m.pct}%</span>
+                </div>
+              ))}
+            </div>
+
+            {/* 브랜딩 */}
+            <div style={{
+              borderTop: "1px solid #f3f0ff", margin: "0 20px",
+              padding: "12px 0",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <span style={{ fontSize: 13, color: "#ddd6fe" }}>🐾 댕댕 감정연구소</span>
+              <span style={{ fontSize: 12, color: "#ddd6fe" }}>dangdang-emotion.vercel.app</span>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
