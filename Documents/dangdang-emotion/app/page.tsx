@@ -62,12 +62,25 @@ export default function Home() {
   }, []);
 
   const handleFile = (file: File) => {
-    setMediaType(file.type || "image/jpeg");
     const reader = new FileReader();
     reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      setPreviewSrc(dataUrl);
-      setImgBase64(dataUrl.split(",")[1]);
+      const original = e.target?.result as string;
+      setPreviewSrc(original);
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 768;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+        const resized = canvas.toDataURL("image/jpeg", 0.82);
+        setMediaType("image/jpeg");
+        setImgBase64(resized.split(",")[1]);
+      };
+      img.src = original;
     };
     reader.readAsDataURL(file);
   };

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
 
     const response = await client.messages.create({
       model: "claude-opus-4-5",
-      max_tokens: 1000,
+      max_tokens: 400,
       system: `강아지 감정 전문가입니다. 반드시 아래 JSON만 반환하세요. 다른 텍스트 없이.
 {
   "emoji":"이모지1개",
