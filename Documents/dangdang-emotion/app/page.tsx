@@ -3,9 +3,20 @@
 import { useState, useRef, useEffect } from "react";
 import html2canvas from "html2canvas";
 
+declare global {
+  interface Window {
+    Kakao?: {
+      isInitialized: () => boolean;
+      init: (key: string) => void;
+      Share: {
+        sendDefault: (options: Record<string, unknown>) => void;
+      };
+    };
+  }
+}
+
 const AD_SECONDS = 5;
-const DAILY_LIMIT = 3;
-const STORAGE_KEY = "dangdang_usage";
+const DAILY_LIMIT = 2;
 
 type Screen = "upload" | "ad" | "result";
 
@@ -18,29 +29,6 @@ interface AnalysisResult {
   moods: { name: string; pct: number; color: string }[];
 }
 
-function getUsageData(): { count: number; date: string } {
-  if (typeof window === "undefined") return { count: 0, date: "" };
-  const today = new Date().toISOString().split("T")[0];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { count: 0, date: today };
-    const data = JSON.parse(raw);
-    if (data.date !== today) return { count: 0, date: today };
-    return data;
-  } catch {
-    return { count: 0, date: today };
-  }
-}
-
-function incrementUsage() {
-  const today = new Date().toISOString().split("T")[0];
-  const data = getUsageData();
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ count: data.count + 1, date: today })
-  );
-}
-
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("upload");
   const [previewSrc, setPreviewSrc] = useState("");
@@ -50,20 +38,17 @@ export default function Home() {
   const [timerSec, setTimerSec] = useState(AD_SECONDS);
   const [timerReady, setTimerReady] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [usageCount, setUsageCount] = useState(0);
   const [moodVisible, setMoodVisible] = useState(false);
   const [dogName, setDogName] = useState("");
-  const [unlimitedMode, setUnlimitedMode] = useState(false);
-  const pawClickRef = useRef(0);
+  const [limitReached, setLimitReached] = useState(false);
+  const [snsConsent, setSnsConsent] = useState(false);
+  const [resultId, setResultId] = useState<number | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const resultRef = useRef<AnalysisResult | null>(null);
   const resultCardRef = useRef<HTMLDivElement>(null);
   const shareCardRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setUsageCount(getUsageData().count);
-  }, []);
 
   const handleFile = (file: File) => {
     const reader = new FileReader();
@@ -96,20 +81,14 @@ export default function Home() {
   };
 
   const startFlow = async () => {
-    const usage = getUsageData();
-    if (usage.count >= DAILY_LIMIT) {
-      alert(`오늘 ${DAILY_LIMIT}회를 모두 사용했어요 🥺\n내일 다시 도전해주세요!`);
-      return;
-    }
     resultRef.current = null;
     setResult(null);
     setTimerSec(AD_SECONDS);
     setTimerReady(false);
+    setLimitReached(false);
     setScreen("ad");
     analyzeInBackground();
     startTimer();
-    incrementUsage();
-    setUsageCount((prev) => prev + 1);
   };
 
   const analyzeInBackground = async () => {
@@ -117,10 +96,32 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: imgBase64, mediaType, dogName }),
+        body: JSON.stringify({ imageBase64: imgBase64, mediaType, dogName, snsConsent }),
       });
       const data = await res.json();
+      if (res.status === 429) {
+        setLimitReached(true);
+        resultRef.current = {
+          emoji: "😢",
+          title: "오늘 분석 횟수를 모두 사용했어요",
+          sub: `하루 ${DAILY_LIMIT}회까지 무료예요. 내일 다시 만나요!`,
+          badge: "🔒 오늘 마감",
+          reasons: [
+            { icon: "📊", label: "안내", text: `하루 ${DAILY_LIMIT}회 무료 분석이 제공돼요.` },
+            { icon: "⏰", label: "초기화", text: "자정이 지나면 횟수가 초기화돼요." },
+            { icon: "💕", label: "내일 봐요", text: "내일 또 강아지 감정을 분석해보세요!" },
+          ],
+          moods: [
+            { name: "행복", pct: 0, color: "#FFB5C8" },
+            { name: "편안", pct: 0, color: "#B5E8D5" },
+            { name: "기대", pct: 0, color: "#C9B8F5" },
+            { name: "불안", pct: 0, color: "#FFE9A0" },
+          ],
+        };
+        return;
+      }
       if (!res.ok) throw new Error(data.error || "분석 실패");
+      setResultId(data.id ?? null);
       resultRef.current = data;
     } catch {
       resultRef.current = {
@@ -157,7 +158,6 @@ export default function Home() {
   };
 
   const showResult = async () => {
-    if (!timerReady) return;
     setLoading(true);
     while (!resultRef.current) {
       await new Promise((r) => setTimeout(r, 300));
@@ -169,7 +169,52 @@ export default function Home() {
     setTimeout(() => setMoodVisible(true), 100);
   };
 
+  useEffect(() => {
+    if (timerReady && screen === "ad") {
+      showResult();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timerReady]);
+
   const [sharing, setSharing] = useState(false);
+
+  const getShareUrl = () => `${window.location.origin}/result/${resultId}`;
+
+  const handleKakaoShare = () => {
+    if (!result || !resultId) return;
+    const Kakao = window.Kakao;
+    if (!Kakao) {
+      alert("카카오 SDK를 불러오는 중이에요. 잠시 후 다시 시도해주세요.");
+      return;
+    }
+    if (!Kakao.isInitialized()) {
+      Kakao.init(process.env.NEXT_PUBLIC_KAKAO_JS_KEY || "");
+    }
+    const shareUrl = getShareUrl();
+    const shareTitle = dogName
+      ? `${result.emoji} ${dogName}의 감정: ${result.title}`
+      : `${result.emoji} ${result.title}`;
+    Kakao.Share.sendDefault({
+      objectType: "feed",
+      content: {
+        title: shareTitle,
+        description: result.sub,
+        imageUrl: "",
+        link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
+      },
+      buttons: [
+        { title: "결과 보기", link: { mobileWebUrl: shareUrl, webUrl: shareUrl } },
+        { title: "나도 분석하기", link: { mobileWebUrl: window.location.origin, webUrl: window.location.origin } },
+      ],
+    });
+  };
+
+  const handleCopyLink = async () => {
+    if (!resultId) return;
+    await navigator.clipboard.writeText(getShareUrl());
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
 
   const handleShare = async () => {
     if (!shareCardRef.current || !result) return;
@@ -207,19 +252,13 @@ export default function Home() {
     setPreviewSrc("");
     setImgBase64("");
     setResult(null);
+    setResultId(null);
     setDogName("");
+    setSnsConsent(false);
+    setLinkCopied(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handlePawClick = () => {
-    pawClickRef.current += 1;
-    if (pawClickRef.current >= 5) {
-      pawClickRef.current = 0;
-      setUnlimitedMode((prev) => !prev);
-    }
-  };
-
-  const remaining = unlimitedMode ? 999 : Math.max(0, DAILY_LIMIT - usageCount);
   const timerPct = timerSec / AD_SECONDS;
 
   return (
@@ -230,12 +269,12 @@ export default function Home() {
         {screen === "upload" && (
           <div>
             <div className="text-center py-8">
-              <span className="text-5xl block animate-bounce cursor-pointer select-none" onClick={handlePawClick}>🐾</span>
+              <span className="text-5xl block animate-bounce select-none">🐾</span>
               <h1 className="font-bold text-3xl text-purple-900 mt-2" style={{ fontFamily: "cursive" }}>
                 우리 강아지 감정은?
               </h1>
               <p className="text-sm text-purple-400 mt-1">사진 한 장으로 강아지 속마음을 읽어드려요</p>
-              <p className="text-xs text-purple-300 mt-1">{unlimitedMode ? "🔓 무제한 모드" : `오늘 남은 횟수: ${remaining}/${DAILY_LIMIT}회`}</p>
+              <p className="text-xs text-purple-300 mt-1">하루 {DAILY_LIMIT}회 무료</p>
             </div>
 
             <div
@@ -294,19 +333,31 @@ export default function Home() {
             </div>
 
             {previewSrc && (
-              <button
-                onClick={startFlow}
-                disabled={remaining <= 0}
-                className="w-full mt-4 py-4 bg-gradient-to-r from-pink-400 to-purple-400 text-white rounded-2xl text-lg font-bold shadow-lg shadow-pink-200 hover:-translate-y-1 hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                style={{ fontFamily: "cursive" }}
-              >
-                {remaining <= 0 ? "😢 오늘 횟수를 모두 사용했어요" : "🔍 감정 분석하기"}
-              </button>
+              <>
+                <label className="flex items-start gap-3 mt-4 bg-white rounded-2xl px-4 py-3 shadow-sm border border-pink-100 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={snsConsent}
+                    onChange={(e) => setSnsConsent(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-purple-400 flex-shrink-0"
+                  />
+                  <span className="text-xs text-purple-600 leading-relaxed">
+                    🏆 내 새끼 자랑 컨텐츠에 올려도 괜찮아요! (SNS 공유 동의)
+                  </span>
+                </label>
+                <button
+                  onClick={startFlow}
+                  className="w-full mt-3 py-4 bg-gradient-to-r from-pink-400 to-purple-400 text-white rounded-2xl text-lg font-bold shadow-lg shadow-pink-200 hover:-translate-y-1 hover:shadow-xl transition-all duration-300"
+                  style={{ fontFamily: "cursive" }}
+                >
+                  🔍 감정 분석하기
+                </button>
+              </>
             )}
           </div>
         )}
 
-        {/* 광고 스크린 */}
+        {/* 대기 스크린 */}
         {screen === "ad" && (
           <div className="mt-4">
             <div className="bg-white rounded-3xl overflow-hidden shadow-2xl shadow-purple-100">
@@ -319,39 +370,41 @@ export default function Home() {
                   />
                 )}
                 <p className="text-lg text-purple-800" style={{ fontFamily: "cursive" }}>
-                  🔍 강아지 감정 분석 중...
+                  결과를 분석 중이에요...
                 </p>
-                <div className="flex justify-center gap-2 mt-2">
+                <div className="flex justify-center gap-1.5 mt-3">
                   {[0, 1, 2].map((i) => (
                     <div
                       key={i}
-                      className={`w-2 h-2 rounded-full ${i === 0 ? "bg-pink-400" : "bg-purple-200"}`}
+                      className="w-2 h-2 rounded-full bg-purple-300 animate-bounce"
+                      style={{ animationDelay: `${i * 0.15}s` }}
                     />
                   ))}
                 </div>
               </div>
 
-              {/* 광고 슬롯 */}
-              <div className="mx-4 my-4 border-2 border-dashed border-purple-100 rounded-2xl min-h-40 flex flex-col items-center justify-center gap-2 p-6 text-center">
-                <span className="text-xs text-gray-300 tracking-widest uppercase">AD</span>
-                <span className="text-4xl">🐶</span>
-                <p className="text-xl text-purple-800" style={{ fontFamily: "cursive" }}>
-                  댕댕이 간식 브랜드
-                </p>
-                <p className="text-sm text-purple-400 leading-relaxed">
-                  우리 강아지에게 딱 맞는
-                  <br />
-                  건강한 간식을 추천해드려요
-                </p>
-                <span className="bg-gradient-to-r from-pink-400 to-purple-400 text-white text-xs px-3 py-1 rounded-full font-bold">
-                  지금 할인 중
-                </span>
+              {/* 쿠팡 파트너스 배너 */}
+              <div className="mx-4 my-4">
+                {/* TODO: 쿠팡 파트너스 배너 링크로 교체 */}
+                <a
+                  href="#"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block border-2 border-dashed border-purple-100 rounded-2xl min-h-48 flex flex-col items-center justify-center gap-2 p-6 text-center hover:border-purple-200 transition-colors"
+                >
+                  <span className="text-xs text-gray-300 tracking-widest uppercase">AD</span>
+                  <span className="text-4xl">🛒</span>
+                  <p className="text-sm text-purple-300">쿠팡 파트너스 배너 영역</p>
+                  <p className="text-xs text-purple-200">이 포스팅은 쿠팡 파트너스 활동의 일환으로,<br/>이에 따른 일정액의 수수료를 제공받습니다.</p>
+                </a>
               </div>
 
               {/* 타이머 */}
               <div className="px-4 pb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-purple-300">잠시 후 결과를 보여드릴게요</span>
+                  <span className="text-xs text-purple-300">
+                    {loading ? "분석 마무리 중..." : `${timerSec}초 후 결과를 보여드릴게요`}
+                  </span>
                   <div className="relative w-9 h-9 flex items-center justify-center">
                     <svg className="absolute top-0 left-0 w-9 h-9 -rotate-90" viewBox="0 0 36 36">
                       <circle cx="18" cy="18" r="15" fill="none" stroke="#f3f0ff" strokeWidth="2.5" />
@@ -366,28 +419,12 @@ export default function Home() {
                     <span className="text-sm text-purple-800 relative z-10 font-bold">{timerSec}</span>
                   </div>
                 </div>
-                <div className="h-2 bg-purple-50 rounded-full overflow-hidden mb-3">
+                <div className="h-2 bg-purple-50 rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-pink-400 to-purple-400 transition-all duration-1000"
                     style={{ width: `${timerPct * 100}%` }}
                   />
                 </div>
-                <button
-                  onClick={showResult}
-                  disabled={!timerReady || loading}
-                  className={`w-full py-3 rounded-2xl text-sm font-bold transition-all duration-300 ${
-                    timerReady && !loading
-                      ? "bg-gradient-to-r from-green-300 to-teal-300 text-teal-800 hover:-translate-y-1 hover:shadow-lg cursor-pointer"
-                      : "bg-purple-50 text-purple-300 cursor-not-allowed"
-                  }`}
-                  style={{ fontFamily: "cursive" }}
-                >
-                  {loading
-                    ? "⏳ 분석 마무리 중..."
-                    : timerReady
-                    ? "🎉 결과 보러 가기!"
-                    : "⏳ 결과 기다리는 중..."}
-                </button>
               </div>
             </div>
           </div>
@@ -461,17 +498,29 @@ export default function Home() {
               </div>
             </div>
 
-            <p className="text-center text-xs text-purple-300 mt-3">
-              오늘 남은 횟수: {remaining}/{DAILY_LIMIT}회
-            </p>
-
-            <button
-              onClick={handleShare}
-              disabled={sharing}
-              className="w-full mt-3 py-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {sharing ? "📸 이미지 만드는 중..." : "📤 이미지로 공유하기"}
-            </button>
+            {!limitReached && resultId && (
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={handleKakaoShare}
+                  className="flex-1 py-3 bg-[#FEE500] text-[#3C1E1E] rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all flex items-center justify-center gap-1.5"
+                >
+                  💬 카카오톡
+                </button>
+                <button
+                  onClick={handleShare}
+                  disabled={sharing}
+                  className="flex-1 py-3 bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  📸 인스타
+                </button>
+                <button
+                  onClick={handleCopyLink}
+                  className="flex-1 py-3 bg-purple-100 text-purple-600 rounded-2xl text-sm font-bold hover:-translate-y-1 hover:shadow-lg transition-all flex items-center justify-center gap-1.5"
+                >
+                  {linkCopied ? "✅ 복사됨" : "🔗 링크"}
+                </button>
+              </div>
+            )}
 
             <button
               onClick={retry}

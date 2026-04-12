@@ -3,13 +3,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const DAILY_LIMIT = 2;
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, mediaType, dogName } = await req.json();
+    const { imageBase64, mediaType, dogName, snsConsent } = await req.json();
 
     if (!imageBase64) {
       return NextResponse.json({ error: "이미지가 없어요" }, { status: 400 });
+    }
+
+    // IP 주소 추출
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+
+    // 오늘 날짜 기준 IP별 사용 횟수 확인
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const { count } = await supabase
+      .from("analyses")
+      .select("*", { count: "exact", head: true })
+      .eq("ip_address", ip)
+      .gte("created_at", todayStart.toISOString());
+
+    if ((count ?? 0) >= DAILY_LIMIT) {
+      return NextResponse.json(
+        { error: "오늘 분석 횟수를 모두 사용했어요", limitReached: true },
+        { status: 429 }
+      );
     }
 
     const response = await client.messages.create({
@@ -39,12 +63,6 @@ export async function POST(req: NextRequest) {
     const clean = text.replace(/```json|```/g, "").trim();
     const result = JSON.parse(clean);
 
-    // IP 주소 추출
-    const ip =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
-
     // 이미지를 Supabase Storage에 업로드
     const imageBuffer = Buffer.from(imageBase64, "base64");
     const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
@@ -58,15 +76,20 @@ export async function POST(req: NextRequest) {
       : supabase.storage.from("dog-images").getPublicUrl(fileName).data.publicUrl;
 
     // DB에 저장
-    await supabase.from("analyses").insert({
-      dog_name: dogName || null,
-      result,
-      image_url: imageUrl,
-      ip_address: ip,
-      created_at: new Date().toISOString(),
-    });
+    const { data: inserted } = await supabase
+      .from("analyses")
+      .insert({
+        dog_name: dogName || null,
+        result,
+        image_url: imageUrl,
+        ip_address: ip,
+        sns_consent: snsConsent ?? false,
+        created_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, id: inserted?.id ?? null });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "분석 실패" }, { status: 500 });
