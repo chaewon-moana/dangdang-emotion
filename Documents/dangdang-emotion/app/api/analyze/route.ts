@@ -13,26 +13,10 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await client.messages.create({
-      model: "claude-opus-4-5",
-      max_tokens: 400,
-      system: `강아지 감정 전문가입니다. 반드시 아래 JSON만 반환하세요. 다른 텍스트 없이.
-{
-  "emoji":"이모지1개",
-  "title":"핵심감정한줄 (예: 나만 봐줘! 모드)",
-  "sub":"속마음한문장(반말체, 귀엽게)",
-  "badge":"이모지+짧은태그 (예: 🥺 애교쟁이)",
-  "reasons":[
-    {"icon":"이모지","label":"눈빛","text":"분석내용"},
-    {"icon":"이모지","label":"자세","text":"분석내용"},
-    {"icon":"이모지","label":"표정","text":"분석내용"}
-  ],
-  "moods":[
-    {"name":"행복","pct":숫자,"color":"#FFB5C8"},
-    {"name":"편안","pct":숫자,"color":"#B5E8D5"},
-    {"name":"기대","pct":숫자,"color":"#C9B8F5"},
-    {"name":"불안","pct":숫자,"color":"#FFE9A0"}
-  ]
-}`,
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
+      system: `강아지 감정 분석가. JSON만 출력.
+{"emoji":"1개","title":"감정한줄","sub":"속마음(반말)","badge":"이모지+태그","reasons":[{"icon":"이모지","label":"눈빛/자세/표정","text":"설명"}x3],"moods":[{"name":"행복","pct":N,"color":"#FFB5C8"},{"name":"편안","pct":N,"color":"#B5E8D5"},{"name":"기대","pct":N,"color":"#C9B8F5"},{"name":"불안","pct":N,"color":"#FFE9A0"}]}`,
       messages: [
         {
           role: "user",
